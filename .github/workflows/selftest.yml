@@ -71,12 +71,17 @@ jobs:
           fi
           echo "PASS: drift detected, exit code 2"
 
-      - name: Assert the diff a human would read names the change
+      - name: Assert the rendered diff identifies the drifted resource
         run: |
           terraform show -no-color drift.tfplan > drift.txt
           cat drift.txt
-          if ! grep -q "tmp-allow-8080" drift.txt; then
-            echo "::error::the rendered plan does not mention the drifted rule"
-            exit 1
-          fi
-          echo "PASS: the PR body would name tmp-allow-8080"
+          # local_file exposes its content only as hashes, so the rule NAME cannot
+          # appear here. What must appear is the resource address and evidence the
+          # tracked content changed -- that is what makes a PR body actionable.
+          # Real cloud resources (azurerm_network_security_group, aws_security_group)
+          # render their attributes in full; see README "What the PR body can show".
+          missing=0
+          grep -q "local_file.nsg_rules" drift.txt || { echo "::error::plan does not name the resource"; missing=1; }
+          grep -qE "content_(md5|sha256)" drift.txt || { echo "::error::plan shows no content change"; missing=1; }
+          [ "$missing" = "0" ] || exit 1
+          echo "PASS: the PR body identifies the drifted resource and shows the content changed"

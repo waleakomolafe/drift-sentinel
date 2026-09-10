@@ -106,6 +106,23 @@ It then asserts all three things that matter:
 
 If that badge is red, this repo is broken. That is the point of it.
 
+
+### What the PR body can show
+
+Terraform renders whatever the provider exposes. That varies, and it is worth knowing
+before you rely on the diff:
+
+| resource | what the PR body shows |
+|---|---|
+| `azurerm_network_security_group` | every attribute, including the rule name and port |
+| `aws_security_group` | every attribute |
+| `local_file` (used by the selftest) | content **hashes** only, never the content |
+
+So for the resources this is actually aimed at, the diff names the change. For
+hash-backed resources it can only tell you *that* something changed. The selftest
+asserts the weaker, honest version, because asserting the stronger one against
+`local_file` would have been a test that passes by lying.
+
 ## Prior art
 
 The pull-request-as-control idea comes from two people whose public work I read:
