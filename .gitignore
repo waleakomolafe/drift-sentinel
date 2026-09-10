@@ -1,0 +1,10 @@
+*.tfplan
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+drift.txt
+drift-report.md
+plan.txt
+*.tok
+.env

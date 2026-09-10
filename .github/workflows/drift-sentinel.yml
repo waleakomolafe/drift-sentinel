@@ -1,0 +1,120 @@
+# Drift Sentinel
+# Scheduled Terraform drift detection that opens a pull request instead of an alert.
+#
+# Why refresh-only: `terraform plan` tells you what your code would change.
+# `terraform plan -refresh-only` tells you what someone already changed without it.
+# The second one is the drift that pages you at 3am six weeks later.
+
+name: drift-sentinel
+
+on:
+  schedule:
+    - cron: "0 2 * * *"        # nightly, deliberately not only at apply time
+  workflow_dispatch:            # so you can prove it works without waiting a day
+
+permissions:
+  contents: write               # to push the drift branch
+  pull-requests: write          # to open the PR
+  id-token: write               # OIDC federation - no long-lived cloud secrets
+
+concurrency:
+  group: drift-sentinel-${{ github.ref }}
+  cancel-in-progress: false     # never cancel a half-finished plan
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false          # an Azure failure must not hide AWS drift
+      matrix:
+        include:
+          - name: azure
+            dir: envs/prod/azure
+          - name: aws
+            dir: envs/prod/aws
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Azure
+        if: matrix.name == 'azure'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Authenticate to AWS
+        if: matrix.name == 'aws'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ vars.TF_VERSION || '1.9.8' }}
+          terraform_wrapper: false
+
+      - name: terraform init
+        working-directory: ${{ matrix.dir }}
+        run: terraform init -input=false -lockfile=readonly
+
+      # -detailed-exitcode: 0 = no drift, 1 = error, 2 = drift found.
+      # We must not let a real error masquerade as "no drift", so 1 fails the job.
+      - name: terraform plan -refresh-only
+        id: plan
+        working-directory: ${{ matrix.dir }}
+        run: |
+          set +e
+          terraform plan -refresh-only -detailed-exitcode -no-color -input=false \
+            -out=drift.tfplan > plan.txt 2>&1
+          code=$?
+          set -e
+          echo "exitcode=$code" >> "$GITHUB_OUTPUT"
+          if [ "$code" = "1" ]; then
+            echo "::error::terraform plan failed - this is an error, not drift"
+            cat plan.txt
+            exit 1
+          fi
+          if [ "$code" = "2" ]; then
+            echo "::warning::drift detected in ${{ matrix.dir }}"
+          fi
+          cat plan.txt
+
+      - name: Render the human-readable diff
+        if: steps.plan.outputs.exitcode == '2'
+        working-directory: ${{ matrix.dir }}
+        run: |
+          terraform show -no-color drift.tfplan > drift.txt
+          {
+            echo "## Drift detected in \`${{ matrix.dir }}\`"
+            echo
+            echo "Something changed outside Terraform. This PR exists so a person"
+            echo "decides what happens next: bring the change into code, or revert it."
+            echo
+            echo "**Do not close this without doing one of those two things.**"
+            echo
+            echo '```terraform'
+            head -c 60000 drift.txt
+            echo '```'
+          } > drift-report.md
+
+      - name: Open a pull request
+        if: steps.plan.outputs.exitcode == '2'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: drift/${{ matrix.name }}
+          title: "Drift detected in ${{ matrix.dir }}"
+          body-path: ${{ matrix.dir }}/drift-report.md
+          labels: drift,needs-decision
+          add-paths: |
+            ${{ matrix.dir }}/drift-report.md
+
+      # The job fails on purpose. A green pipeline with drift in it is a lie,
+      # and a silent auto-reconcile hides the same problem one layer down.
+      - name: Fail loudly
+        if: steps.plan.outputs.exitcode == '2'
+        run: |
+          echo "::error::Drift in ${{ matrix.dir }}. A PR was opened. Not auto-reconciling."
+          exit 1
