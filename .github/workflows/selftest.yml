@@ -1,0 +1,82 @@
+# Proves the drift-detection logic actually works, on every push, with no
+# cloud credentials. If this goes red, Drift Sentinel is broken.
+#
+# It asserts BOTH directions, because a detector that always says "drift"
+# is as useless as one that never does.
+
+name: selftest
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  detect-drift-for-real:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: examples/selftest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+          terraform_wrapper: false
+
+      - name: Build a real state file
+        run: |
+          terraform init -input=false
+          terraform apply -auto-approve -input=false
+
+      - name: Assert exit code 0 when nothing has changed
+        run: |
+          set +e
+          terraform plan -refresh-only -detailed-exitcode -no-color -input=false
+          code=$?
+          set -e
+          echo "exit code: $code"
+          if [ "$code" != "0" ]; then
+            echo "::error::expected 0 (no drift) on a clean state, got $code"
+            exit 1
+          fi
+          echo "PASS: clean state reports no drift"
+
+      - name: Change the resource outside Terraform
+        run: |
+          python3 - <<'PY'
+          import json, pathlib
+          p = pathlib.Path("nsg-web-prod.json")
+          d = json.loads(p.read_text())
+          # the change someone makes in the portal at 2am during an incident
+          d["security_rules"].append(
+              {"name": "tmp-allow-8080", "priority": 310, "destination_port_range": "8080"}
+          )
+          p.write_text(json.dumps(d))
+          print("added tmp-allow-8080 behind Terraform's back")
+          PY
+
+      - name: Assert exit code 2 when drift exists
+        run: |
+          set +e
+          terraform plan -refresh-only -detailed-exitcode -no-color -input=false -out=drift.tfplan
+          code=$?
+          set -e
+          echo "exit code: $code"
+          if [ "$code" != "2" ]; then
+            echo "::error::expected 2 (drift detected), got $code -- detection is broken"
+            exit 1
+          fi
+          echo "PASS: drift detected, exit code 2"
+
+      - name: Assert the diff a human would read names the change
+        run: |
+          terraform show -no-color drift.tfplan > drift.txt
+          cat drift.txt
+          if ! grep -q "tmp-allow-8080" drift.txt; then
+            echo "::error::the rendered plan does not mention the drifted rule"
+            exit 1
+          fi
+          echo "PASS: the PR body would name tmp-allow-8080"

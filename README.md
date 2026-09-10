@@ -1,5 +1,7 @@
 # Drift Sentinel
 
+![selftest](https://github.com/waleakomolafe/drift-sentinel/actions/workflows/selftest.yml/badge.svg)
+
 Scheduled Terraform drift detection that **opens a pull request instead of an alert**.
 
 A Slack message nobody reads is not a control. A pull request somebody has to close is.
@@ -85,6 +87,24 @@ Secret: `AWS_ROLE_ARN`. Variable: `AWS_REGION`.
 | 2 | drift found | opens the PR, then fails the job |
 
 Conflating 1 and 2 is the most common way this kind of check goes quietly dead.
+
+
+## Is it actually tested?
+
+Yes, on every push, with no cloud credentials.
+
+`.github/workflows/selftest.yml` builds real Terraform state using the `local`
+provider, then edits the managed file **behind Terraform's back** -- the same
+mechanism as somebody editing an NSG in the Azure portal, minus the subscription.
+It then asserts all three things that matter:
+
+| assertion | why it's there |
+|---|---|
+| clean state returns exit code **0** | a detector that always cries drift is useless |
+| drifted state returns exit code **2** | the actual detection |
+| the rendered plan **names the drifted rule** | proves the PR body would be readable, not empty |
+
+If that badge is red, this repo is broken. That is the point of it.
 
 ## Prior art
 
