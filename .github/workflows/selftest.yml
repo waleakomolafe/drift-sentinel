@@ -46,17 +46,16 @@ jobs:
 
       - name: Change the resource outside Terraform
         run: |
-          python3 - <<'PY'
-          import json, pathlib
-          p = pathlib.Path("nsg-web-prod.json")
-          d = json.loads(p.read_text())
-          # the change someone makes in the portal at 2am during an incident
-          d["security_rules"].append(
-              {"name": "tmp-allow-8080", "priority": 310, "destination_port_range": "8080"}
-          )
-          p.write_text(json.dumps(d))
-          print("added tmp-allow-8080 behind Terraform's back")
-          PY
+          # the rule someone adds in the portal at 2am during an incident,
+          # and never puts back into the code
+          jq -c '.security_rules += [{
+                   "name": "tmp-allow-8080",
+                   "priority": 310,
+                   "destination_port_range": "8080"
+                 }]' nsg-web-prod.json > nsg-web-prod.json.tmp
+          mv nsg-web-prod.json.tmp nsg-web-prod.json
+          echo "added tmp-allow-8080 behind Terraform's back:"
+          jq '.security_rules[-1]' nsg-web-prod.json
 
       - name: Assert exit code 2 when drift exists
         run: |
