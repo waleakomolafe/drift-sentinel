@@ -123,6 +123,13 @@ hash-backed resources it can only tell you *that* something changed. The selftes
 asserts the weaker, honest version, because asserting the stronger one against
 `local_file` would have been a test that passes by lying.
 
+## Help wanted
+
+Four things I would like a hand with, and one thing I will not merge, are written
+out in [CONTRIBUTING.md](CONTRIBUTING.md). The short version: a GCP job, an ignore
+list for drift that is expected, and anyone willing to tell me the exit-code
+handling is wrong.
+
 ## Prior art
 
 The pull-request-as-control idea comes from two people whose public work I read:
