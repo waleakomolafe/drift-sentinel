@@ -4,13 +4,58 @@
 # Why refresh-only: `terraform plan` tells you what your code would change.
 # `terraform plan -refresh-only` tells you what someone already changed without it.
 # The second one is the drift that pages you at 3am six weeks later.
+#
+# This is a reusable workflow. Call it from your own repo rather than copying it,
+# so you get fixes without re-copying:
+#
+#   jobs:
+#     drift:
+#       uses: waleakomolafe/drift-sentinel/.github/workflows/drift-sentinel.yml@v1
+#       with:
+#         directories: '[{"name":"azure","dir":"envs/prod/azure","cloud":"azure"}]'
+#       secrets: inherit
+#
+# See README.md for the full input list.
 
 name: drift-sentinel
 
 on:
-  schedule:
-    - cron: "0 2 * * *"        # nightly, deliberately not only at apply time
-  workflow_dispatch:            # so you can prove it works without waiting a day
+  workflow_call:
+    inputs:
+      directories:
+        description: >-
+          JSON array of the environments to check. Each entry needs `name`,
+          `dir` and `cloud` ("azure", "aws" or "none" if credentials are
+          already present). Example:
+          '[{"name":"azure","dir":"envs/prod/azure","cloud":"azure"}]'
+        required: true
+        type: string
+      terraform_version:
+        description: Terraform version to run.
+        required: false
+        type: string
+        default: "1.9.8"
+      aws_region:
+        description: Region for the AWS credential step.
+        required: false
+        type: string
+        default: ""
+      working_directory_is_repo_root:
+        description: >-
+          Set false if your Terraform lives in a directory that is not checked
+          out at the repo root. Reserved for future use.
+        required: false
+        type: boolean
+        default: true
+    secrets:
+      AZURE_CLIENT_ID:
+        required: false
+      AZURE_TENANT_ID:
+        required: false
+      AZURE_SUBSCRIPTION_ID:
+        required: false
+      AWS_ROLE_ARN:
+        required: false
 
 permissions:
   contents: write               # to push the drift branch
@@ -27,17 +72,13 @@ jobs:
     strategy:
       fail-fast: false          # an Azure failure must not hide AWS drift
       matrix:
-        include:
-          - name: azure
-            dir: envs/prod/azure
-          - name: aws
-            dir: envs/prod/aws
+        include: ${{ fromJSON(inputs.directories) }}
 
     steps:
       - uses: actions/checkout@v4
 
       - name: Authenticate to Azure
-        if: matrix.name == 'azure'
+        if: matrix.cloud == 'azure'
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -45,15 +86,15 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Authenticate to AWS
-        if: matrix.name == 'aws'
+        if: matrix.cloud == 'aws'
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION }}
+          aws-region: ${{ inputs.aws_region }}
 
       - uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: ${{ vars.TF_VERSION || '1.9.8' }}
+          terraform_version: ${{ inputs.terraform_version }}
           terraform_wrapper: false
 
       - name: terraform init

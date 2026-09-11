@@ -61,9 +61,45 @@ bring the change into code, or revert it deliberately.
 
 ## Setup
 
-1. Copy `.github/workflows/drift-sentinel.yml` into your repo.
-2. Point the matrix `dir` values at your environment directories.
-3. Configure OIDC federation so no long-lived cloud keys are needed:
+Drift Sentinel is a **reusable workflow**. You call it; you do not copy it. That means a
+fix here reaches you without you re-copying anything.
+
+Create `.github/workflows/drift.yml` in your repo:
+
+```yaml
+name: drift
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+jobs:
+  drift:
+    uses: waleakomolafe/drift-sentinel/.github/workflows/drift-sentinel.yml@v1
+    with:
+      directories: >-
+        [
+          {"name":"azure","dir":"envs/prod/azure","cloud":"azure"},
+          {"name":"aws","dir":"envs/prod/aws","cloud":"aws"}
+        ]
+      aws_region: us-east-1
+    secrets: inherit
+```
+
+Change the `dir` values to your environment directories. That is the whole setup.
+
+### Inputs
+
+| input | required | default | what it is |
+|---|---|---|---|
+| `directories` | yes | — | JSON array of `{name, dir, cloud}`. `cloud` is `azure`, `aws`, or `none` if credentials are already present |
+| `terraform_version` | no | `1.9.8` | version passed to `setup-terraform` |
+| `aws_region` | no | `""` | region for the AWS credential step |
+
+### Credentials
+
+OIDC federation, so there are no long-lived cloud keys:
 
 **Azure** — a federated credential on an app registration
 ([docs](https://learn.microsoft.com/azure/developer/github/connect-from-azure)).
@@ -71,10 +107,11 @@ Secrets: `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`.
 
 **AWS** — an IAM role trusting GitHub's OIDC provider
 ([docs](https://docs.github.com/actions/deployment/security-hardening-your-deployments/configuring-openid-connect-in-amazon-web-services)).
-Secret: `AWS_ROLE_ARN`. Variable: `AWS_REGION`.
+Secret: `AWS_ROLE_ARN`.
 
-4. Give the plan identity **read-only** access. It never applies anything.
-5. Run it once by hand from the Actions tab rather than waiting for the cron.
+Give the plan identity **read-only** access. It never applies anything.
+
+Then run it once by hand from the Actions tab rather than waiting for the cron.
 
 ## Exit codes
 

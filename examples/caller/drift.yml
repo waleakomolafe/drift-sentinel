@@ -1,0 +1,24 @@
+# Copy this file into YOUR repository as .github/workflows/drift.yml
+# and change the two `dir` values. That is the whole setup.
+#
+# You are calling Drift Sentinel, not vendoring it, so fixes reach you
+# without copying anything again.
+
+name: drift
+
+on:
+  schedule:
+    - cron: "0 2 * * *"   # nightly, deliberately not only at apply time
+  workflow_dispatch:      # so you can prove it works without waiting a day
+
+jobs:
+  drift:
+    uses: waleakomolafe/drift-sentinel/.github/workflows/drift-sentinel.yml@v1
+    with:
+      directories: >-
+        [
+          {"name":"azure","dir":"envs/prod/azure","cloud":"azure"},
+          {"name":"aws","dir":"envs/prod/aws","cloud":"aws"}
+        ]
+      aws_region: us-east-1
+    secrets: inherit
